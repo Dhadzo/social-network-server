@@ -1,0 +1,76 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String?
+  password  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  posts    Post[]
+  comments Comment[]
+  likes    Like[]
+}
+
+model Post {
+  id        String   @id @default(uuid())
+  title     String
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  userId  String
+
+  // Relations
+  user   User      @relation(fields: [userId], references: [id])
+  comments Comment[]
+  likes    Like[]
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  userId  String
+  postId    String
+
+  // Relations
+  user   User   @relation(fields: [userId], references: [id])
+  post     Post   @relation(fields: [postId], references: [id])
+  likes    Like[]
+
+  @@index([postId])
+  @@index([userId])
+}
+
+model Like {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  userId    String
+  postId    String?
+  commentId String?
+
+  // Relations
+  user    User    @relation(fields: [userId], references: [id])
+  post    Post?   @relation(fields: [postId], references: [id])
+  comment Comment? @relation(fields: [commentId], references: [id])
+
+  // Ensure a user can only like a post or comment once
+  @@unique([userId, postId])
+  @@unique([userId, commentId])
+  @@index([userId])
+  @@index([postId])
+  @@index([commentId])
+} 
