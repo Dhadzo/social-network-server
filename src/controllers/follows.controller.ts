@@ -34,7 +34,7 @@ export class FollowsController {
         return;
       }
 
-      const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 3;
 
       const suggestions = await followsService.getSuggestedUsers(
         req.user.id,
