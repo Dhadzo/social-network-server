@@ -14,7 +14,7 @@ export const hasPermission = (requiredPermission: string) => {
         return;
       }
 
-      const [permissions] = await pool.execute(
+      const [permissions] = await pool.query(
         `SELECT DISTINCT p.name 
          FROM permissions p
          JOIN role_permissions rp ON p.id = rp.permission_id
@@ -52,7 +52,7 @@ export const hasRole = (requiredRole: string) => {
         return;
       }
 
-      const [roles] = await pool.execute(
+      const [roles] = await pool.query(
         `SELECT r.name 
          FROM roles r
          JOIN user_roles ur ON r.id = ur.role_id

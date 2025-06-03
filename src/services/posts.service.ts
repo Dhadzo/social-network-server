@@ -1,6 +1,5 @@
 import pool from '../config/database';
 import { Post, CreatePostDTO, PostWithUser } from '../types/post.types';
-import { ResultSetHeader } from 'mysql2';
 import { NotificationsService } from './notifications.service';
 
 // Update the PostWithUser interface to include likes
@@ -21,18 +20,20 @@ export class PostsService {
     postData: CreatePostDTO
   ): Promise<PostWithUser> {
     try {
-      const [result] = await pool.execute<ResultSetHeader>(
-        'INSERT INTO posts (content, user_id) VALUES (?, ?)',
+      const {
+        rows: [result]
+      } = await pool.query(
+        'INSERT INTO posts (content, user_id) VALUES ($1, $2) RETURNING id',
         [postData.content, userId]
       );
 
       // Fetch the newly created post with user information
-      const [posts] = await pool.execute<any[]>(
+      const { rows: posts } = await pool.query(
         `SELECT p.*, u.id as user_id, u.username, u.email, u.name 
        FROM posts p 
        JOIN users u ON p.user_id = u.id 
-       WHERE p.id = ?`,
-        [result.insertId]
+       WHERE p.id = $1`,
+        [result.id]
       );
 
       const post = posts[0];
@@ -65,16 +66,16 @@ export class PostsService {
     page: number;
   }> {
     // First get total count
-    const [countResult] = await pool.execute<any[]>(
-      'SELECT COUNT(*) as total FROM posts'
-    );
-    const total = Number(countResult[0].total);
+    const {
+      rows: [countResult]
+    } = await pool.query('SELECT COUNT(*) as total FROM posts');
+    const total = Number(countResult.total);
 
     let posts: any = [];
 
     try {
       // Then get paginated posts
-      [posts] = await pool.query<any[]>(
+      const { rows } = await pool.query(
         `SELECT 
           p.id,
           p.content,
@@ -84,15 +85,16 @@ export class PostsService {
           u.email,
           u.name,
           COUNT(DISTINCT l.id) as likes_count,
-          MAX(CASE WHEN l.user_id = ? THEN 1 ELSE 0 END) as user_has_liked
+          MAX(CASE WHEN l.user_id = $1 THEN 1 ELSE 0 END) as user_has_liked
         FROM posts p 
         JOIN users u ON p.user_id = u.id 
         LEFT JOIN likes l ON l.likeable_id = p.id AND l.likeable_type = 'post'
         GROUP BY p.id, p.content, p.user_id, p.created_at, u.username, u.email, u.name
         ORDER BY p.created_at DESC
-        LIMIT ? OFFSET ?`,
+        LIMIT $2 OFFSET $3`,
         [Number(userId) || 0, Number(limit), Number(offset)]
       );
+      posts = rows;
     } catch (error) {
       console.error('Database error:', error);
       throw error;
@@ -129,7 +131,7 @@ export class PostsService {
     postId: number,
     userId?: number
   ): Promise<PostWithUserAndLikes | null> {
-    const [posts] = await pool.execute<any[]>(
+    const { rows: posts } = await pool.query(
       `SELECT 
         p.*, 
         u.id as user_id, 
@@ -137,11 +139,11 @@ export class PostsService {
         u.email, 
         u.name,
         COUNT(DISTINCT l.id) as likes_count,
-        MAX(CASE WHEN l.user_id = ? THEN 1 ELSE 0 END) as user_has_liked
+        MAX(CASE WHEN l.user_id = $1 THEN 1 ELSE 0 END) as user_has_liked
        FROM posts p 
        JOIN users u ON p.user_id = u.id 
        LEFT JOIN likes l ON l.likeable_id = p.id AND l.likeable_type = 'post'
-       WHERE p.id = ?
+       WHERE p.id = $2
        GROUP BY p.id, u.id, u.username, u.email, u.name`,
       [userId || 0, postId]
     );
@@ -177,29 +179,29 @@ export class PostsService {
       }
 
       // Check if the like exists
-      const [existingLikes] = await pool.execute<any[]>(
-        'SELECT * FROM likes WHERE user_id = ? AND likeable_id = ? AND likeable_type = ?',
+      const { rows: existingLikes } = await pool.query(
+        'SELECT * FROM likes WHERE user_id = $1 AND likeable_id = $2 AND likeable_type = $3',
         [userId, postId, 'post']
       );
 
       if (existingLikes.length > 0) {
         // Like exists, so we'll unlike
-        await pool.execute<ResultSetHeader>(
-          'DELETE FROM likes WHERE user_id = ? AND likeable_id = ? AND likeable_type = ?',
+        await pool.query(
+          'DELETE FROM likes WHERE user_id = $1 AND likeable_id = $2 AND likeable_type = $3',
           [userId, postId, 'post']
         );
       } else {
         // No like exists, so we'll like
-        await pool.execute<ResultSetHeader>(
-          'INSERT INTO likes (user_id, likeable_id, likeable_type) VALUES (?, ?, ?)',
+        await pool.query(
+          'INSERT INTO likes (user_id, likeable_id, likeable_type) VALUES ($1, $2, $3)',
           [userId, postId, 'post']
         );
 
         // Create notification if the liker is not the post author
         if (post.user_id !== userId) {
           // Get the actor's (liker's) information
-          const [actors] = await pool.execute<any[]>(
-            'SELECT username, name FROM users WHERE id = ?',
+          const { rows: actors } = await pool.query(
+            'SELECT username, name FROM users WHERE id = $1',
             [userId]
           );
           const actor = actors[0];
@@ -234,17 +236,19 @@ export class PostsService {
     page: number;
   }> {
     // First get total count
-    const [countResult] = await pool.execute<any[]>(
-      'SELECT COUNT(*) as total FROM posts WHERE user_id = ?',
+    const {
+      rows: [countResult]
+    } = await pool.query(
+      'SELECT COUNT(*) as total FROM posts WHERE user_id = $1',
       [userId]
     );
-    const total = Number(countResult[0].total);
+    const total = Number(countResult.total);
 
     let posts: any = [];
 
     try {
       // Then get paginated posts
-      [posts] = await pool.query<any[]>(
+      const { rows } = await pool.query(
         `SELECT 
           p.id,
           p.content,
@@ -254,16 +258,17 @@ export class PostsService {
           u.email,
           u.name,
           COUNT(DISTINCT l.id) as likes_count,
-          MAX(CASE WHEN l.user_id = ? THEN 1 ELSE 0 END) as user_has_liked
+          MAX(CASE WHEN l.user_id = $1 THEN 1 ELSE 0 END) as user_has_liked
         FROM posts p 
         JOIN users u ON p.user_id = u.id 
         LEFT JOIN likes l ON l.likeable_id = p.id AND l.likeable_type = 'post'
-        WHERE p.user_id = ?
+        WHERE p.user_id = $2
         GROUP BY p.id, p.content, p.user_id, p.created_at, u.username, u.email, u.name
         ORDER BY p.created_at DESC
-        LIMIT ? OFFSET ?`,
+        LIMIT $3 OFFSET $4`,
         [currentUserId, userId, Number(limit), Number(offset)]
       );
+      posts = rows;
     } catch (error) {
       console.error('Database error:', error);
       throw error;
@@ -308,17 +313,19 @@ export class PostsService {
     page: number;
   }> {
     // First get total count
-    const [countResult] = await pool.query<any[]>(
-      'SELECT COUNT(*) as total FROM likes WHERE user_id = ? AND likeable_type = ?',
+    const {
+      rows: [countResult]
+    } = await pool.query(
+      'SELECT COUNT(*) as total FROM likes WHERE user_id = $1 AND likeable_type = $2',
       [userId, 'post']
     );
-    const total = Number(countResult[0].total);
+    const total = Number(countResult.total);
 
     let posts: any = [];
 
     try {
       // Then get paginated posts
-      [posts] = await pool.query<any[]>(
+      const { rows } = await pool.query(
         `SELECT 
           p.id,
           p.content,
@@ -328,16 +335,17 @@ export class PostsService {
           u.email,
           u.name,
           COUNT(DISTINCT l.id) as likes_count,
-          MAX(CASE WHEN l.user_id = ? THEN 1 ELSE 0 END) as user_has_liked
+          MAX(CASE WHEN l.user_id = $1 THEN 1 ELSE 0 END) as user_has_liked
         FROM posts p 
         JOIN users u ON p.user_id = u.id 
         JOIN likes l ON l.likeable_id = p.id AND l.likeable_type = 'post'
-        WHERE l.user_id = ?
+        WHERE l.user_id = $2
         GROUP BY p.id, p.content, p.user_id, p.created_at, u.username, u.email, u.name
         ORDER BY p.created_at DESC
-        LIMIT ? OFFSET ?`,
+        LIMIT $3 OFFSET $4`,
         [currentUserId, userId, Number(limit), Number(offset)]
       );
+      posts = rows;
     } catch (error) {
       console.error('Database error:', error);
       throw error;

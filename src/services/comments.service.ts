@@ -1,5 +1,4 @@
 import pool from '../config/database';
-import { ResultSetHeader } from 'mysql2';
 import { NotificationsService } from './notifications.service';
 
 export interface Comment {
@@ -32,11 +31,11 @@ export class CommentsService {
   }
 
   async getCommentsByPostId(postId: number): Promise<CommentWithUser[]> {
-    const [comments] = await pool.execute<any[]>(
+    const { rows: comments } = await pool.query(
       `SELECT c.*, u.id as user_id, u.username, u.email, u.name 
        FROM comments c 
        JOIN users u ON c.user_id = u.id 
-       WHERE c.post_id = ? 
+       WHERE c.post_id = $1 
        ORDER BY c.created_at DESC`,
       [postId]
     );
@@ -62,8 +61,8 @@ export class CommentsService {
   ): Promise<CommentWithUser> {
     try {
       // First get the post to check the author
-      const [posts] = await pool.execute<any[]>(
-        'SELECT user_id FROM posts WHERE id = ?',
+      const { rows: posts } = await pool.query(
+        'SELECT user_id FROM posts WHERE id = $1',
         [commentData.postId]
       );
 
@@ -73,18 +72,20 @@ export class CommentsService {
 
       const postAuthorId = posts[0].user_id;
 
-      const [result] = await pool.execute<ResultSetHeader>(
-        'INSERT INTO comments (content, post_id, user_id) VALUES (?, ?, ?)',
+      const {
+        rows: [result]
+      } = await pool.query(
+        'INSERT INTO comments (content, post_id, user_id) VALUES ($1, $2, $3) RETURNING id',
         [commentData.content, commentData.postId, userId]
       );
 
       // Fetch the newly created comment with user information
-      const [comments] = await pool.execute<any[]>(
+      const { rows: comments } = await pool.query(
         `SELECT c.*, u.id as user_id, u.username, u.email, u.name 
          FROM comments c 
          JOIN users u ON c.user_id = u.id 
-         WHERE c.id = ?`,
-        [result.insertId]
+         WHERE c.id = $1`,
+        [result.id]
       );
 
       const comment = comments[0];
@@ -92,8 +93,8 @@ export class CommentsService {
       // Create notification if the commenter is not the post author
       if (postAuthorId !== userId) {
         // Get the commenter's information
-        const [commenters] = await pool.execute<any[]>(
-          'SELECT username, name FROM users WHERE id = ?',
+        const { rows: commenters } = await pool.query(
+          'SELECT username, name FROM users WHERE id = $1',
           [userId]
         );
         const commenter = commenters[0];
@@ -104,7 +105,7 @@ export class CommentsService {
           type: 'comment',
           message: `${commenter.name} commented on your post`,
           postId: commentData.postId,
-          commentId: result.insertId
+          commentId: result.id
         });
       }
 

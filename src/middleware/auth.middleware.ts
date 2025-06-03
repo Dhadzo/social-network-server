@@ -25,8 +25,8 @@ export const authenticateUser = async (
     };
 
     // Get user from database
-    const [users] = await pool.execute<User[]>(
-      'SELECT id, username, email, name FROM users WHERE id = ?',
+    const { rows: users } = await pool.query<User>(
+      'SELECT id, username, email, name FROM users WHERE id = $1',
       [decoded.user.id]
     );
 

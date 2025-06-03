@@ -8,9 +8,11 @@ import {
 export class NotificationsService {
   async createNotification(data: CreateNotificationDTO): Promise<Notification> {
     try {
-      const [result] = await pool.execute<any>(
+      const {
+        rows: [result]
+      } = await pool.query(
         `INSERT INTO notifications (user_id, actor_id, type, message, post_id, comment_id) 
-         VALUES (?, ?, ?, ?, ?, ?)`,
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
         [
           data.userId,
           data.actorId,
@@ -21,7 +23,7 @@ export class NotificationsService {
         ]
       );
 
-      const notification = await this.getNotificationById(result.insertId);
+      const notification = await this.getNotificationById(result.id);
       if (!notification) {
         throw new Error('Failed to retrieve created notification');
       }
@@ -33,7 +35,7 @@ export class NotificationsService {
   }
 
   async getNotificationById(id: number): Promise<Notification | null> {
-    const [notifications] = await pool.execute<any[]>(
+    const { rows: notifications } = await pool.query(
       `SELECT 
         n.*,
         u.id as user_id,
@@ -45,7 +47,7 @@ export class NotificationsService {
        FROM notifications n
        JOIN users u ON n.actor_id = u.id
        LEFT JOIN posts p ON n.post_id = p.id
-       WHERE n.id = ?`,
+       WHERE n.id = $1`,
       [id]
     );
 
@@ -79,14 +81,16 @@ export class NotificationsService {
     limit: number = 10
   ): Promise<NotificationsResponse> {
     // Get total count
-    const [countResult] = await pool.execute<any[]>(
-      'SELECT COUNT(*) as total FROM notifications WHERE user_id = ?',
+    const {
+      rows: [countResult]
+    } = await pool.query(
+      'SELECT COUNT(*) as total FROM notifications WHERE user_id = $1',
       [userId]
     );
-    const total = Number(countResult[0].total);
+    const total = Number(countResult.total);
 
     // Get paginated notifications
-    const [notifications] = await pool.query<any[]>(
+    const { rows: notifications } = await pool.query(
       `SELECT 
         n.*,
         u.id as user_id,
@@ -98,9 +102,9 @@ export class NotificationsService {
        FROM notifications n
        JOIN users u ON n.actor_id = u.id
        LEFT JOIN posts p ON n.post_id = p.id
-       WHERE n.user_id = ?
+       WHERE n.user_id = $1
        ORDER BY n.created_at DESC
-       LIMIT ? OFFSET ?`,
+       LIMIT $2 OFFSET $3`,
       [userId, limit, offset]
     );
 
@@ -138,8 +142,8 @@ export class NotificationsService {
     userId: number
   ): Promise<Notification | null> {
     try {
-      await pool.execute(
-        'UPDATE notifications SET read = TRUE WHERE id = ? AND user_id = ?',
+      await pool.query(
+        'UPDATE notifications SET read = TRUE WHERE id = $1 AND user_id = $2',
         [notificationId, userId]
       );
       return this.getNotificationById(notificationId);
@@ -151,8 +155,8 @@ export class NotificationsService {
 
   async markAllAsRead(userId: number): Promise<void> {
     try {
-      await pool.execute(
-        'UPDATE notifications SET read = TRUE WHERE user_id = ?',
+      await pool.query(
+        'UPDATE notifications SET read = TRUE WHERE user_id = $1',
         [userId]
       );
     } catch (error) {
@@ -162,10 +166,12 @@ export class NotificationsService {
   }
 
   async getUnreadCount(userId: number): Promise<number> {
-    const [result] = await pool.execute<any[]>(
-      'SELECT COUNT(*) as count FROM notifications WHERE user_id = ? AND read = FALSE',
+    const {
+      rows: [result]
+    } = await pool.query(
+      'SELECT COUNT(*) as count FROM notifications WHERE user_id = $1 AND read = FALSE',
       [userId]
     );
-    return Number(result[0].count);
+    return Number(result.count);
   }
 }

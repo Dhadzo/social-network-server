@@ -3,12 +3,11 @@ import jwt from 'jsonwebtoken';
 import pool from '../config/database';
 import { SignupDTO, SigninDTO, User, SafeUser } from '../types/auth.types';
 import { environment } from '../config/environment';
-import { ResultSetHeader, RowDataPacket } from 'mysql2';
 
 export class AuthService {
   async signup(userData: SignupDTO) {
-    const [existing] = await pool.execute<RowDataPacket[]>(
-      'SELECT id FROM users WHERE email = ?',
+    const { rows: existing } = await pool.query(
+      'SELECT id FROM users WHERE email = $1',
       [userData.email]
     );
 
@@ -18,65 +17,63 @@ export class AuthService {
 
     const hashedPassword = await bcrypt.hash(userData.password, 10);
 
-    let result: any;
-    const connection = await pool.getConnection();
-
+    const client = await pool.connect();
     try {
-      // Start a transaction using the connection
-      await connection.query('START TRANSACTION');
+      await client.query('BEGIN');
 
       // Insert user
-      [result] = await connection.execute<ResultSetHeader>(
-        'INSERT INTO users (username, password, email, name) VALUES (?, ?, ?, ?)',
+      const {
+        rows: [result]
+      } = await client.query(
+        'INSERT INTO users (username, password, email, name) VALUES ($1, $2, $3, $4) RETURNING id',
         [userData.username, hashedPassword, userData.email, userData.name]
       );
 
       // Get the default user role
-      const [roles] = await connection.execute<RowDataPacket[]>(
-        'SELECT id FROM roles WHERE name = ?',
+      const { rows: roles } = await client.query(
+        'SELECT id FROM roles WHERE name = $1',
         ['user']
       );
 
       if (roles.length) {
         // Assign the default user role
-        await connection.execute(
-          'INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)',
-          [result.insertId, roles[0].id]
+        await client.query(
+          'INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)',
+          [result.id, roles[0].id]
         );
       }
 
-      await connection.query('COMMIT');
+      await client.query('COMMIT');
+
+      const safeUser: SafeUser = {
+        id: result.id,
+        username: userData.username,
+        email: userData.email,
+        name: userData.name
+      };
+
+      const token = jwt.sign(
+        { user: safeUser },
+        environment.jwtSecret as string,
+        {
+          expiresIn: '2h'
+        }
+      );
+
+      return { user: safeUser, token };
     } catch (error) {
-      await connection.query('ROLLBACK');
+      await client.query('ROLLBACK');
       console.error('Database error:', error);
       throw error;
     } finally {
-      connection.release();
+      client.release();
     }
-
-    const safeUser: SafeUser = {
-      id: result.insertId,
-      username: userData.username,
-      email: userData.email,
-      name: userData.name
-    };
-
-    const token = jwt.sign(
-      { user: safeUser },
-      environment.jwtSecret as string,
-      {
-        expiresIn: '2h'
-      }
-    );
-
-    return { user: safeUser, token };
   }
 
   async signin(credentials: SigninDTO) {
-    const [result] = await pool.execute('SELECT 1');
     try {
-      const [users] = await pool.execute<RowDataPacket[]>(
-        'SELECT id, email, password, username, name FROM users WHERE email = ?',
+      const { rows: users } = await pool.query(
+        'SELECT id, email, password, username, name FROM users WHERE email = $1',
         [credentials.email]
       );
 
@@ -109,13 +106,13 @@ export class AuthService {
       throw error;
     }
   }
-  async deleteAccount(id: string): Promise<boolean> {
-    const [result] = await pool.execute<ResultSetHeader>(
-      'DELETE FROM users WHERE id = ?',
-      [parseInt(id, 10)]
-    );
 
-    if (result.affectedRows === 0) {
+  async deleteAccount(id: string): Promise<boolean> {
+    const { rowCount } = await pool.query('DELETE FROM users WHERE id = $1', [
+      parseInt(id, 10)
+    ]);
+
+    if (rowCount === 0) {
       throw new Error('User not found');
     }
 
@@ -127,8 +124,8 @@ export class AuthService {
   ): Promise<SafeUser> {
     // If email is being updated, check for duplicates
     if (updateData.email) {
-      const [existing] = await pool.execute<User[]>(
-        'SELECT id FROM users WHERE email = ? AND id != ?',
+      const { rows: existing } = await pool.query(
+        'SELECT id FROM users WHERE email = $1 AND id != $2',
         [updateData.email, updateData.id]
       );
 
@@ -139,8 +136,8 @@ export class AuthService {
 
     // If username is being updated, check for duplicates
     if (updateData.username) {
-      const [existing] = await pool.execute<User[]>(
-        'SELECT id FROM users WHERE username = ? AND id != ?',
+      const { rows: existing } = await pool.query(
+        'SELECT id FROM users WHERE username = $1 AND id != $2',
         [updateData.username, updateData.id]
       );
 
@@ -151,8 +148,8 @@ export class AuthService {
 
     // Build the SET clause dynamically
     const updateFields = Object.keys(updateData)
-      .filter((key) => key !== 'id') // Exclude id from update fields
-      .map((key) => `${key} = ?`)
+      .filter((key) => key !== 'id')
+      .map((key, index) => `${key} = $${index + 1}`)
       .join(', ');
 
     const values = Object.keys(updateData)
@@ -161,19 +158,18 @@ export class AuthService {
 
     values.push(updateData.id);
 
-    // Add the id for the WHERE clause
-    const [result] = await pool.execute<ResultSetHeader>(
-      `UPDATE users SET ${updateFields} WHERE id = ?`,
+    const { rowCount } = await pool.query(
+      `UPDATE users SET ${updateFields} WHERE id = $${values.length}`,
       values
     );
 
-    if (result.affectedRows === 0) {
+    if (rowCount === 0) {
       throw new Error('User not found');
     }
 
     // Fetch and return updated user data
-    const [users] = await pool.execute<User[]>(
-      'SELECT id, email, username, name FROM users WHERE id = ?',
+    const { rows: users } = await pool.query(
+      'SELECT id, email, username, name FROM users WHERE id = $1',
       [updateData.id]
     );
 
@@ -188,8 +184,8 @@ export class AuthService {
   }
 
   async refreshToken(userId: number): Promise<{ token: string }> {
-    const [users] = await pool.execute<User[]>(
-      'SELECT id, email, username, name FROM users WHERE id = ?',
+    const { rows: users } = await pool.query(
+      'SELECT id, email, username, name FROM users WHERE id = $1',
       [userId]
     );
 

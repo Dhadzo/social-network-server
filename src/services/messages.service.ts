@@ -7,7 +7,6 @@ import {
   CreateMessageDTO,
   CreateConversationDTO
 } from '../types/message.types';
-import { ResultSetHeader } from 'mysql2';
 import { NotificationsService } from './notifications.service';
 
 export class MessagesService {
@@ -21,18 +20,19 @@ export class MessagesService {
     userId: number,
     data: CreateConversationDTO
   ): Promise<ConversationWithDetails> {
-    const connection = await pool.getConnection();
+    const client = await pool.connect();
 
-    console.log('data', data);
     try {
-      await connection.beginTransaction();
+      await client.query('BEGIN');
 
       // Create conversation
-      const [conversationResult] = await connection.execute<ResultSetHeader>(
-        'INSERT INTO conversations (type) VALUES (?)',
+      const {
+        rows: [conversationResult]
+      } = await client.query(
+        'INSERT INTO conversations (type) VALUES ($1) RETURNING id',
         [data.type]
       );
-      const conversationId = conversationResult.insertId;
+      const conversationId = conversationResult.id;
 
       // Add participants (including current user)
       const allParticipantIds = [...new Set([...data.participant_ids, userId])];
@@ -40,28 +40,28 @@ export class MessagesService {
         conversationId,
         pid
       ]);
-      await connection.query(
-        'INSERT INTO conversation_participants (conversation_id, user_id) VALUES ?',
-        [participantValues]
+      await client.query(
+        'INSERT INTO conversation_participants (conversation_id, user_id) VALUES ($1, $2)',
+        participantValues
       );
 
       // Fetch the created conversation with details
-      const [conversations] = await connection.execute<any[]>(
+      const { rows: conversations } = await client.query(
         `SELECT 
-                    c.*,
-                    cp.user_id,
-                    cp.last_read_at,
-                    u.username,
-                    u.email,
-                    u.name
-                FROM conversations c
-                JOIN conversation_participants cp ON c.id = cp.conversation_id
-                JOIN users u ON cp.user_id = u.id
-                WHERE c.id = ?`,
+          c.*,
+          cp.user_id,
+          cp.last_read_at,
+          u.username,
+          u.email,
+          u.name
+        FROM conversations c
+        JOIN conversation_participants cp ON c.id = cp.conversation_id
+        JOIN users u ON cp.user_id = u.id
+        WHERE c.id = $1`,
         [conversationId]
       );
 
-      await connection.commit();
+      await client.query('COMMIT');
 
       // Format the response
       const conversation: ConversationWithDetails = {
@@ -85,10 +85,10 @@ export class MessagesService {
 
       return conversation;
     } catch (error) {
-      await connection.rollback();
+      await client.query('ROLLBACK');
       throw error;
     } finally {
-      connection.release();
+      client.release();
     }
   }
 
@@ -96,11 +96,11 @@ export class MessagesService {
     userId: number,
     data: CreateMessageDTO
   ): Promise<MessageWithUser> {
-    const connection = await pool.getConnection();
+    const client = await pool.connect();
     try {
       // Verify user is part of the conversation
-      const [participants] = await connection.execute<any[]>(
-        'SELECT * FROM conversation_participants WHERE conversation_id = ? AND user_id = ?',
+      const { rows: participants } = await client.query(
+        'SELECT * FROM conversation_participants WHERE conversation_id = $1 AND user_id = $2',
         [data.conversation_id, userId]
       );
 
@@ -109,38 +109,40 @@ export class MessagesService {
       }
 
       // Create message
-      const [result] = await connection.execute<ResultSetHeader>(
-        'INSERT INTO messages (conversation_id, sender_id, content, type) VALUES (?, ?, ?, ?)',
+      const {
+        rows: [result]
+      } = await client.query(
+        'INSERT INTO messages (conversation_id, sender_id, content, type) VALUES ($1, $2, $3, $4) RETURNING id',
         [data.conversation_id, userId, data.content, data.type || 'text']
       );
 
       // Update conversation's updated_at timestamp
-      await connection.execute(
-        'UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      await client.query(
+        'UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = $1',
         [data.conversation_id]
       );
 
       // Fetch the created message with sender details
-      const [messages] = await connection.execute<any[]>(
+      const { rows: messages } = await client.query(
         `SELECT 
-                    m.*,
-                    u.username,
-                    u.email,
-                    u.name
-                FROM messages m
-                JOIN users u ON m.sender_id = u.id
-                WHERE m.id = ?`,
-        [result.insertId]
+          m.*,
+          u.username,
+          u.email,
+          u.name
+        FROM messages m
+        JOIN users u ON m.sender_id = u.id
+        WHERE m.id = $1`,
+        [result.id]
       );
 
       const message = messages[0];
 
       // Get all participants except the sender
-      const [recipients] = await connection.execute<any[]>(
+      const { rows: recipients } = await client.query(
         `SELECT cp.user_id, u.name 
          FROM conversation_participants cp
          JOIN users u ON cp.user_id = u.id
-         WHERE cp.conversation_id = ? AND cp.user_id != ?`,
+         WHERE cp.conversation_id = $1 AND cp.user_id != $2`,
         [data.conversation_id, userId]
       );
 
@@ -175,7 +177,7 @@ export class MessagesService {
         }
       };
     } finally {
-      connection.release();
+      client.release();
     }
   }
 
@@ -185,11 +187,9 @@ export class MessagesService {
     limit: number = 50,
     before?: string
   ): Promise<MessageWithUser[]> {
-    console.log('conversationId', conversationId);
-
     // Verify user is part of the conversation
-    const [participants] = await pool.query<any[]>(
-      'SELECT * FROM conversation_participants WHERE conversation_id = ? AND user_id = ?',
+    const { rows: participants } = await pool.query(
+      'SELECT * FROM conversation_participants WHERE conversation_id = $1 AND user_id = $2',
       [conversationId, userId]
     );
 
@@ -212,25 +212,25 @@ export class MessagesService {
     }
 
     // Fetch messages with explicit column selection
-    const [messages] = await pool.query<any[]>(
+    const { rows: messages } = await pool.query(
       `SELECT 
-                m.id,
-                m.conversation_id,
-                m.sender_id,
-                m.content,
-                m.type,
-                m.status,
-                m.created_at,
-                m.updated_at,
-                u.username,
-                u.email,
-                u.name
-            FROM messages m
-            JOIN users u ON m.sender_id = u.id
-            WHERE m.conversation_id = ?
-            ${beforeTimestamp ? 'AND m.created_at < ?' : ''}
-            ORDER BY m.created_at ASC
-            LIMIT ?`,
+        m.id,
+        m.conversation_id,
+        m.sender_id,
+        m.content,
+        m.type,
+        m.status,
+        m.created_at,
+        m.updated_at,
+        u.username,
+        u.email,
+        u.name
+      FROM messages m
+      JOIN users u ON m.sender_id = u.id
+      WHERE m.conversation_id = $1
+      ${beforeTimestamp ? 'AND m.created_at < $2' : ''}
+      ORDER BY m.created_at ASC
+      LIMIT $${beforeTimestamp ? '3' : '2'}`,
       beforeTimestamp
         ? [conversationId, beforeTimestamp, limit]
         : [conversationId, limit]
@@ -259,40 +259,40 @@ export class MessagesService {
     limit: number = 20,
     offset: number = 0
   ): Promise<ConversationWithDetails[]> {
-    const [conversations] = await pool.query<any[]>(
+    const { rows: conversations } = await pool.query(
       `SELECT 
-                c.*,
-                cp.user_id,
-                cp.last_read_at,
-                u.username,
-                u.email,
-                u.name,
-                m.id as last_message_id,
-                m.content as last_message_content,
-                m.type as last_message_type,
-                m.created_at as last_message_created_at,
-                m.sender_id as last_message_sender_id,
-                sender.username as last_message_sender_username,
-                sender.email as last_message_sender_email,
-                sender.name as last_message_sender_name
-            FROM conversations c
-            JOIN conversation_participants cp ON c.id = cp.conversation_id
-            JOIN users u ON cp.user_id = u.id
-            LEFT JOIN (
-                SELECT m1.*
-                FROM messages m1
-                LEFT JOIN messages m2 ON m1.conversation_id = m2.conversation_id 
-                    AND m1.created_at < m2.created_at
-                WHERE m2.id IS NULL
-            ) m ON c.id = m.conversation_id
-            LEFT JOIN users sender ON m.sender_id = sender.id
-            WHERE c.id IN (
-                SELECT conversation_id 
-                FROM conversation_participants 
-                WHERE user_id = ?
-            )
-            ORDER BY m.created_at DESC
-            LIMIT ? OFFSET ?`,
+        c.*,
+        cp.user_id,
+        cp.last_read_at,
+        u.username,
+        u.email,
+        u.name,
+        m.id as last_message_id,
+        m.content as last_message_content,
+        m.type as last_message_type,
+        m.created_at as last_message_created_at,
+        m.sender_id as last_message_sender_id,
+        sender.username as last_message_sender_username,
+        sender.email as last_message_sender_email,
+        sender.name as last_message_sender_name
+      FROM conversations c
+      JOIN conversation_participants cp ON c.id = cp.conversation_id
+      JOIN users u ON cp.user_id = u.id
+      LEFT JOIN LATERAL (
+        SELECT m1.*
+        FROM messages m1
+        WHERE m1.conversation_id = c.id
+        ORDER BY m1.created_at DESC
+        LIMIT 1
+      ) m ON true
+      LEFT JOIN users sender ON m.sender_id = sender.id
+      WHERE c.id IN (
+        SELECT conversation_id 
+        FROM conversation_participants 
+        WHERE user_id = $1
+      )
+      ORDER BY m.created_at DESC NULLS LAST
+      LIMIT $2 OFFSET $3`,
       [userId, limit, offset]
     );
 
@@ -350,34 +350,34 @@ export class MessagesService {
     conversationId: number,
     userId: number
   ): Promise<void> {
-    const connection = await pool.getConnection();
+    const client = await pool.connect();
     try {
-      await connection.beginTransaction();
+      await client.query('BEGIN');
 
       // Update last_read_at in conversation_participants
-      await connection.execute(
-        'UPDATE conversation_participants SET last_read_at = CURRENT_TIMESTAMP WHERE conversation_id = ? AND user_id = ?',
+      await client.query(
+        'UPDATE conversation_participants SET last_read_at = CURRENT_TIMESTAMP WHERE conversation_id = $1 AND user_id = $2',
         [conversationId, userId]
       );
 
       // Update message status to read
-      await connection.execute(
-        'UPDATE messages SET status = "read" WHERE conversation_id = ? AND sender_id != ? AND status != "read"',
+      await client.query(
+        "UPDATE messages SET status = 'read' WHERE conversation_id = $1 AND sender_id != $2 AND status != 'read'",
         [conversationId, userId]
       );
 
-      await connection.commit();
+      await client.query('COMMIT');
     } catch (error) {
-      await connection.rollback();
+      await client.query('ROLLBACK');
       throw error;
     } finally {
-      connection.release();
+      client.release();
     }
   }
 
   async getConversationParticipants(conversationId: number) {
-    const [participants] = await pool.execute<any[]>(
-      'SELECT * FROM conversation_participants WHERE conversation_id = ?',
+    const { rows: participants } = await pool.query(
+      'SELECT * FROM conversation_participants WHERE conversation_id = $1',
       [conversationId]
     );
     return participants;

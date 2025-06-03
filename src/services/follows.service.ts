@@ -1,5 +1,4 @@
 import pool from '../config/database';
-import { ResultSetHeader } from 'mysql2';
 import { NotificationsService } from './notifications.service';
 
 interface User {
@@ -22,28 +21,28 @@ export class FollowsService {
   ): Promise<boolean> {
     try {
       // Check if already following
-      const [existingFollows] = await pool.execute<any[]>(
-        'SELECT * FROM follows WHERE follower_id = ? AND following_id = ?',
+      const { rows: existingFollows } = await pool.query(
+        'SELECT * FROM follows WHERE follower_id = $1 AND following_id = $2',
         [followerId, followingId]
       );
 
       if (existingFollows.length > 0) {
         // Unfollow
-        await pool.execute<ResultSetHeader>(
-          'DELETE FROM follows WHERE follower_id = ? AND following_id = ?',
+        await pool.query(
+          'DELETE FROM follows WHERE follower_id = $1 AND following_id = $2',
           [followerId, followingId]
         );
         return false;
       } else {
         // Follow
-        await pool.execute<ResultSetHeader>(
-          'INSERT INTO follows (follower_id, following_id) VALUES (?, ?)',
+        await pool.query(
+          'INSERT INTO follows (follower_id, following_id) VALUES ($1, $2)',
           [followerId, followingId]
         );
 
         // Get the follower's information for the notification
-        const [followers] = await pool.execute<any[]>(
-          'SELECT username, name FROM users WHERE id = ?',
+        const { rows: followers } = await pool.query(
+          'SELECT username, name FROM users WHERE id = $1',
           [followerId]
         );
         const follower = followers[0];
@@ -67,17 +66,17 @@ export class FollowsService {
   async getSuggestedUsers(userId: number, limit: number = 10): Promise<User[]> {
     try {
       // Get users who are not already being followed and not the current user
-      const [users] = await pool.query<any[]>(
+      const { rows: users } = await pool.query(
         `SELECT u.id, u.username, u.name, u.email
          FROM users u
-         WHERE u.id != ?
+         WHERE u.id != $1
          AND u.id NOT IN (
            SELECT following_id 
            FROM follows 
-           WHERE follower_id = ?
+           WHERE follower_id = $2
          )
-         ORDER BY RAND()
-         LIMIT ?`,
+         ORDER BY RANDOM()
+         LIMIT $3`,
         [userId, userId, limit]
       );
 
@@ -95,11 +94,11 @@ export class FollowsService {
 
   async getFollowing(userId: number): Promise<User[]> {
     try {
-      const [users] = await pool.execute<any[]>(
+      const { rows: users } = await pool.query(
         `SELECT u.id, u.username, u.name, u.email
          FROM users u
          JOIN follows f ON u.id = f.following_id
-         WHERE f.follower_id = ?`,
+         WHERE f.follower_id = $1`,
         [userId]
       );
 
@@ -117,11 +116,11 @@ export class FollowsService {
 
   async getFollowers(userId: number): Promise<User[]> {
     try {
-      const [users] = await pool.execute<any[]>(
+      const { rows: users } = await pool.query(
         `SELECT u.id, u.username, u.name, u.email
          FROM users u
          JOIN follows f ON u.id = f.follower_id
-         WHERE f.following_id = ?`,
+         WHERE f.following_id = $1`,
         [userId]
       );
 
@@ -139,11 +138,11 @@ export class FollowsService {
 
   async getUserFollowers(userId: number): Promise<User[]> {
     try {
-      const [users] = await pool.execute<any[]>(
+      const { rows: users } = await pool.query(
         `SELECT u.id, u.username, u.name, u.email
          FROM users u
          JOIN follows f ON u.id = f.follower_id
-         WHERE f.following_id = ?`,
+         WHERE f.following_id = $1`,
         [userId]
       );
 
@@ -161,11 +160,11 @@ export class FollowsService {
 
   async getUserFollowing(userId: number): Promise<User[]> {
     try {
-      const [users] = await pool.execute<any[]>(
+      const { rows: users } = await pool.query(
         `SELECT u.id, u.username, u.name, u.email
          FROM users u
          JOIN follows f ON u.id = f.following_id
-         WHERE f.follower_id = ?`,
+         WHERE f.follower_id = $1`,
         [userId]
       );
 

@@ -9,11 +9,11 @@ export class UsersService {
   ): Promise<User[]> {
     try {
       const searchQuery = `%${query}%`;
-      const [users] = await pool.query<User[]>(
+      const { rows: users } = await pool.query(
         `SELECT id, username, name, email 
          FROM users 
-         WHERE username LIKE ? OR name LIKE ?
-         LIMIT ? OFFSET ?`,
+         WHERE username LIKE $1 OR name LIKE $2
+         LIMIT $3 OFFSET $4`,
         [searchQuery, searchQuery, limit, offset]
       );
 
@@ -26,10 +26,10 @@ export class UsersService {
 
   async getUserByUsername(username: string): Promise<User | null> {
     try {
-      const [users] = await pool.query<User[]>(
+      const { rows: users } = await pool.query(
         `SELECT id, username, name, email 
          FROM users 
-         WHERE username = ?`,
+         WHERE username = $1`,
         [username]
       );
 
