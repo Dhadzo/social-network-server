@@ -40,6 +40,10 @@ export interface AuthRequest extends Request {
   query: {
     [key: string]: string | undefined;
   };
+  body: any;
+  cookies: {
+    [key: string]: string;
+  };
 }
 
 export interface SignupDTO {
