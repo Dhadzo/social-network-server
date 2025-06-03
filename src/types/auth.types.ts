@@ -34,6 +34,12 @@ export interface SafeUser {
 
 export interface AuthRequest extends Request {
   user?: SafeUser;
+  params: {
+    [key: string]: string;
+  };
+  query: {
+    [key: string]: string | undefined;
+  };
 }
 
 export interface SignupDTO {
