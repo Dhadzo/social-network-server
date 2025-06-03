@@ -9,9 +9,8 @@ export class AuthController {
       res.cookie('token', token, {
         httpOnly: true,
         secure: environment.nodeEnv === 'production',
-        sameSite: 'strict',
+        sameSite: environment.nodeEnv === 'production' ? 'lax' : 'strict',
         maxAge: 2 * 60 * 60 * 1000 // 2 hours
-        // maxAge: 1000 * 20 // 20 seconds
       });
 
       res.status(201).json({
@@ -36,9 +35,8 @@ export class AuthController {
       res.cookie('token', token, {
         httpOnly: true,
         secure: environment.nodeEnv === 'production',
-        sameSite: 'strict',
+        sameSite: environment.nodeEnv === 'production' ? 'lax' : 'strict',
         maxAge: 2 * 60 * 60 * 1000 // 2 hours
-        // maxAge: 1000 * 20 // 20 seconds
       });
       res.json({ message: 'Successfully signed in', user: user });
     } catch (error) {
@@ -93,7 +91,7 @@ export class AuthController {
       res.cookie('token', token, {
         httpOnly: true,
         secure: environment.nodeEnv === 'production',
-        sameSite: 'strict',
+        sameSite: environment.nodeEnv === 'production' ? 'lax' : 'strict',
         maxAge: 2 * 60 * 60 * 1000 // 2 hours
       });
 
