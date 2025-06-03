@@ -198,7 +198,7 @@ export class MessagesService {
     }
 
     // Validate and format the before timestamp if provided
-    let beforeTimestamp = null;
+    let beforeTimestamp: string | null = null;
     if (before && before !== '0') {
       try {
         // Try to parse the timestamp
