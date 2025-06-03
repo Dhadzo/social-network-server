@@ -18,9 +18,15 @@ const httpServer = createServer(app);
 // Initialize Socket.IO
 const socketService = new SocketService(httpServer);
 
+const allowedOrigins: string[] = [];
+
+if (environment.clientUrl) allowedOrigins.push(environment.clientUrl);
+if (environment.vercelClientUrl)
+  allowedOrigins.push(environment.vercelClientUrl);
+
 app.use(
   cors({
-    origin: [environment.clientUrl, environment.vercelClientUrl],
+    origin: allowedOrigins,
     credentials: true
   })
 );
