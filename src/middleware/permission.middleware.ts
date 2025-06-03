@@ -14,16 +14,16 @@ export const hasPermission = (requiredPermission: string) => {
         return;
       }
 
-      const [permissions] = await pool.query(
+      const { rows: permissions } = await pool.query(
         `SELECT DISTINCT p.name 
          FROM permissions p
          JOIN role_permissions rp ON p.id = rp.permission_id
          JOIN user_roles ur ON rp.role_id = ur.role_id
-         WHERE ur.user_id = ?`,
+         WHERE ur.user_id = $1`,
         [req.user.id]
       );
 
-      const userPermissions = (permissions as any[]).map((p) => p.name);
+      const userPermissions = permissions.map((p) => p.name);
 
       if (!userPermissions.includes(requiredPermission)) {
         res.status(403).json({
@@ -52,15 +52,15 @@ export const hasRole = (requiredRole: string) => {
         return;
       }
 
-      const [roles] = await pool.query(
+      const { rows: roles } = await pool.query(
         `SELECT r.name 
          FROM roles r
          JOIN user_roles ur ON r.id = ur.role_id
-         WHERE ur.user_id = ?`,
+         WHERE ur.user_id = $1`,
         [req.user.id]
       );
 
-      const userRoles = (roles as any[]).map((r) => r.name);
+      const userRoles = roles.map((r) => r.name);
 
       if (!userRoles.includes(requiredRole)) {
         res.status(403).json({
