@@ -9,7 +9,8 @@ export class AuthController {
       res.cookie('token', token, {
         httpOnly: true,
         secure: environment.nodeEnv === 'production',
-        sameSite: environment.nodeEnv === 'production' ? 'lax' : 'strict',
+        // sameSite: environment.nodeEnv === 'production' ? 'lax' : 'strict',
+        sameSite: 'none',
         maxAge: 2 * 60 * 60 * 1000 // 2 hours
       });
 
@@ -35,7 +36,8 @@ export class AuthController {
       res.cookie('token', token, {
         httpOnly: true,
         secure: environment.nodeEnv === 'production',
-        sameSite: environment.nodeEnv === 'production' ? 'lax' : 'strict',
+        // sameSite: environment.nodeEnv === 'production' ? 'lax' : 'strict',
+        sameSite: 'none',
         maxAge: 2 * 60 * 60 * 1000 // 2 hours
       });
       res.json({ message: 'Successfully signed in', user: user });
@@ -91,7 +93,8 @@ export class AuthController {
       res.cookie('token', token, {
         httpOnly: true,
         secure: environment.nodeEnv === 'production',
-        sameSite: environment.nodeEnv === 'production' ? 'lax' : 'strict',
+        // sameSite: environment.nodeEnv === 'production' ? 'lax' : 'strict',
+        sameSite: 'none',
         maxAge: 2 * 60 * 60 * 1000 // 2 hours
       });
 
