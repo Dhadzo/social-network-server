@@ -20,7 +20,7 @@ const socketService = new SocketService(httpServer);
 
 app.use(
   cors({
-    origin: environment.clientUrl,
+    origin: [environment.clientUrl, environment.vercelClientUrl],
     credentials: true
   })
 );
